@@ -2,6 +2,8 @@
 
 char bad[30]; /*user's input*/
 int _ret=0;/*check data exist*/
+uint16_t pat_len;
+BmCtx* ctx;
 void dump(unsigned char* buf, int size) {
     int i;
     for (i = 0; i < size; i++) {
@@ -15,57 +17,51 @@ void dump(unsigned char* buf, int size) {
 /* returns packet id */
 void check(unsigned char *data,int ret){
     struct libnet_ipv4_hdr* ip = (struct libnet_ipv4_hdr*)(data);
-    
+
     /* check tcp */
     if(ip->ip_p!=0x06)return;
-    
+
     /* go to tcp */
     data += sizeof(struct libnet_ipv4_hdr);
     struct libnet_tcp_hdr* tcp = (struct libnet_tcp_hdr*)(data);
-    
+
     /* go to http */
     data += (tcp->th_off)*4;
 
     if(check_str(data))/*if data exist*/
-    { 
-	    dump(data,ret);
-	    _ret = 1;
+    {
+        dump(data,ret);
+        _ret = 1;
     }
 }
 
 int check_str(unsigned char *data){
 
-    unsigned char pat[100] = "Host: ";
-    strcat(pat,bad);
-    uint16_t pat_len = strlen(pat);
     uint16_t txt_len = strlen(data);
-    
-    /*using BoyerMoore to find url*/
-    BmCtx* ctx = BoyerMooreCtxInit((uint8_t*)pat, pat_len);
 
+    /*using BoyerMoore to find url*/
     printf("Bad Character table\n");
     for (int i = 0; i < ALPHABET_SIZE; i++) {
-	if (ctx->bmBc[i] != pat_len)
-		printf("%d(%c) = %d\n", i, i, ctx->bmBc[i]);
+    if (ctx->bmBc[i] != pat_len)
+        printf("%d(%c) = %d\n", i, i, ctx->bmBc[i]);
     }
     printf("\n");
 
     printf("Good Suffix table\n");
     for (int i = 0; i < pat_len; i++) {
- 	printf("%d(%c) %d\n", i, pat[i], ctx->bmGs[i]);
+    printf("%d(%c) %d\n", i, bad[i], ctx->bmGs[i]);
     }
     printf("\n");
 
-    unsigned char* found = BoyerMoore(pat, pat_len, data, txt_len, ctx);
-    
+    unsigned char* found = BoyerMoore(bad, pat_len, data, txt_len, ctx);
+
     int flag = 0;
     if (found == NULL)
-	    printf("not found\n");
+        printf("not found\n");
     else{
-	    printf("found %ld\n", found - data);
-	    flag = 1;
+        printf("found %ld\n", found - data);
+        flag = 1;
     }
-    BoyerMooreCtxDeInit(ctx);
     return flag;
 }
 
@@ -141,7 +137,7 @@ static int cb(struct nfq_q_handle *qh, struct nfgenmsg *nfmsg,
     uint32_t id = print_pkt(nfa);
     printf("entering callback\n");
     if(_ret)/*if found url*/
-	    return nfq_set_verdict(qh,id,NF_DROP,0,NULL);//drop
+        return nfq_set_verdict(qh,id,NF_DROP,0,NULL);//drop
     return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);//accept
 }
 
@@ -156,7 +152,6 @@ int main(int argc, char **argv)
 
     if (argc == 2) {
         queue = 0;
-	    strcpy(bad,argv[1]);
     }
 
     printf("opening library handle\n");
@@ -177,6 +172,11 @@ int main(int argc, char **argv)
         fprintf(stderr, "error during nfq_bind_pf()\n");
         exit(1);
     }
+    unsigned char pat[100] = "Host: ";
+    strcat(pat,argv[1]);
+    strcpy(bad,pat);
+    pat_len = strlen(pat);
+    ctx = BoyerMooreCtxInit((uint8_t*)pat, pat_len);
 
     printf("binding this socket to queue '%d'\n", queue);
     qh = nfq_create_queue(h, queue, &cb, NULL);
@@ -184,7 +184,7 @@ int main(int argc, char **argv)
         fprintf(stderr, "error during nfq_create_queue()\n");
         exit(1);
     }
-
+    BoyerMooreCtxDeInit(ctx);
     printf("setting copy_packet mode\n");
     if (nfq_set_mode(qh, NFQNL_COPY_PACKET, 0xffff) < 0) {
         fprintf(stderr, "can't set packet_copy mode\n");
@@ -234,3 +234,4 @@ int main(int argc, char **argv)
 
     exit(0);
 }
+
